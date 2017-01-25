@@ -25,13 +25,14 @@ import com.dtolabs.rundeck.plugins.notification.NotificationPlugin;
 
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
 import java.net.MalformedURLException;
+import java.net.Proxy;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.*;
 
 import freemarker.cache.ClassTemplateLoader;
-import freemarker.cache.FileTemplateLoader;
 import freemarker.cache.MultiTemplateLoader;
 import freemarker.cache.TemplateLoader;
 import freemarker.template.Configuration;
@@ -65,6 +66,12 @@ public class SlackNotificationPlugin implements NotificationPlugin {
 
     @PluginProperty(title = "WebHook URL", description = "Slack Incoming WebHook URL", required = true)
     private String webhook_url;
+
+    @PluginProperty(title = "Proxy Host", description = "Proxy host to use when communicating to the Slack API.", required = false, defaultValue = "", scope = PropertyScope.Project)
+    private String proxyHost;
+
+    @PluginProperty(title = "Proxy Port", description = "Proxy port to use when communicating to the HipChat API.", required = false, defaultValue = "", scope = PropertyScope.Project)
+    private Integer proxyPort;
 
     /**
      * Sends a message to a Slack room when a job notification event is raised by Rundeck.
@@ -114,7 +121,7 @@ public class SlackNotificationPlugin implements NotificationPlugin {
         }
 
         String message = generateMessage(trigger, executionData, config);
-        String slackResponse = invokeSlackAPIMethod(webhook_url, message);
+        String slackResponse = invokeSlackAPIMethod(webhook_url, message, proxyHost, proxyPort);
         String ms = "payload=" + URLEncoder.encode(message);
 
         if ("ok".equals(slackResponse)) {
@@ -168,15 +175,20 @@ public class SlackNotificationPlugin implements NotificationPlugin {
     }
 
     // private String invokeSlackAPIMethod(String teamDomain, String token, String message) {
-    private String invokeSlackAPIMethod(String webhook_url, String message) {
+    private String invokeSlackAPIMethod(String webhook_url, String message, String proxyHost, Integer proxyPort) {
         // URL requestUrl = toURL(SLACK_API_URL_SCHEMA + teamDomain + SLACK_API_BASE + SLACK_API_WEHOOK_PATH + token);
         URL requestUrl = toURL(webhook_url);
 
         HttpURLConnection connection = null;
         InputStream responseStream = null;
         String body = "payload=" + URLEncoder.encode(message);
+
         try {
-            connection = openConnection(requestUrl);
+            Proxy proxy = null;
+            if (proxyHost != null && proxyPort != null) {
+                proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort));
+            }
+            connection = openConnection(requestUrl, proxy);
             putRequestStream(connection, body);
             responseStream = getResponseStream(connection);
             return getSlackResponse(responseStream);
@@ -197,9 +209,13 @@ public class SlackNotificationPlugin implements NotificationPlugin {
         }
     }
 
-    private HttpURLConnection openConnection(URL requestUrl) {
+    private HttpURLConnection openConnection(URL requestUrl, Proxy proxy) {
         try {
-            return (HttpURLConnection) requestUrl.openConnection();
+            if (proxy != null) {
+                return (HttpURLConnection) requestUrl.openConnection(proxy);
+            } else {
+                return (HttpURLConnection) requestUrl.openConnection();
+            }
         } catch (IOException ioEx) {
             throw new SlackNotificationPluginException("Error opening connection to Slack URL: [" + ioEx.getMessage() + "].", ioEx);
         }
